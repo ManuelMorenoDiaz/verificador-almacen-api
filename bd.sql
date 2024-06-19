@@ -1,5 +1,4 @@
-
-ALTER TABLE Categorias MODIFY id_categoria INT AUTO_INCREMENT;
+-- Active: 1718734395482@@127.0.0.1@3306@verificador_almacen
 
 CREATE TABLE Categorias (
     id_categoria INT PRIMARY KEY AUTO_INCREMENT,
@@ -12,8 +11,6 @@ CREATE TABLE Productos (
     id_producto INT PRIMARY KEY AUTO_INCREMENT,
     nombre VARCHAR(100),
     descripcion VARCHAR(250),
-    codigo_barras VARCHAR(250),
-    codigo_qr VARCHAR(250),
     imagen VARCHAR(250),
     cantidad INT,
     id_categoria INT,
@@ -51,7 +48,7 @@ CREATE TABLE UsuariosSucursales (
 );
 
 
-CREATE TABLE ÓrdenesVerificación (
+CREATE TABLE OrdenesVerificación (
     id_ordenVerificacion INT PRIMARY KEY AUTO_INCREMENT,
     estado ENUM('Abierta', 'Cerrada'),
     fecha DATE,
@@ -67,7 +64,7 @@ CREATE TABLE DetallesÓrdenes (
     id_producto INT,
     id_ordenVerificacion INT,
     FOREIGN KEY (id_producto) REFERENCES Productos(id_producto),
-    FOREIGN KEY (id_ordenVerificacion) REFERENCES ÓrdenesVerificación(id_ordenVerificacion)
+    FOREIGN KEY (id_ordenVerificacion) REFERENCES OrdenesVerificación(id_ordenVerificacion)
 );
 
 

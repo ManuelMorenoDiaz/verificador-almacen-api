@@ -1,54 +1,55 @@
 from flask import Blueprint, request, jsonify
 from flask_mysqldb import MySQL
-import qrcode
-from barcode import Code128
-from barcode.writer import ImageWriter
-import io
-import base64
-import os
 
 mysql = MySQL()
 
 productos_bp = Blueprint('productos', __name__)
 
+def get_user_info(token):
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT u.id_usuario, u.rol, us.id_sucursal
+        FROM Usuarios u
+        JOIN Sesiones s ON u.id_usuario = s.id_usuario
+        LEFT JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario
+        WHERE s.token = %s AND s.fecha_fin IS NULL
+    """, (token,))
+    user = cur.fetchone()
+    cur.close()
+    return user
+
+# Crear un producto
 @productos_bp.route('/productos', methods=['POST'])
 def add_producto():
+    token = request.headers.get('Authorization')
+    user_info = get_user_info(token)
+    if not user_info:
+        return jsonify({'error': 'Acceso no autorizado'}), 403
+
+    id_usuario, rol, id_sucursal_usuario = user_info
+
+    if rol not in ['Admin', 'Gerente']:
+        return jsonify({'error': 'Permisos insuficientes'}), 403
+
     data = request.get_json()
     nombre = data['nombre']
     descripcion = data['descripcion']
     imagen = data['imagen']
     cantidad = data['cantidad']
     id_categoria = data['id_categoria']
-    id_sucursal = data['id_sucursal']  # Agregar el campo id_sucursal
-    
-    # Generar el código de barras
-    barcode_buffer = io.BytesIO()
-    barcode = Code128(nombre[:20], writer=ImageWriter())  # Limitar la longitud del nombre a 20 caracteres
-    barcode.write(barcode_buffer)
-    barcode_data = base64.b64encode(barcode_buffer.getvalue()).decode('utf-8')[:1000]  # Limitar la longitud de los datos codificados a 1000 caracteres
-    
-    # Generar el código QR
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(nombre[:20])  # Limitar la longitud del nombre a 20 caracteres
-    qr.make(fit=True)
-    qr_img = qr.make_image(fill_color="black", back_color="white")
-    qr_buffer = io.BytesIO()
-    qr_img.save(qr_buffer, format="PNG")
-    qr_data = base64.b64encode(qr_buffer.getvalue()).decode('utf-8')  # Limitar la longitud de los datos codificados a 1000 caracteres
+    id_sucursal = data['id_sucursal']
+
+    if rol == 'Gerente' and id_sucursal != id_sucursal_usuario:
+        return jsonify({'error': 'Permisos insuficientes para añadir productos a otra sucursal'}), 403
     
     cur = mysql.connection.cursor()
     
     query_insertion = """
-        INSERT INTO Productos (nombre, descripcion, codigo_barras, codigo_qr, imagen, cantidad, id_categoria, id_sucursal)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO Productos (nombre, descripcion, imagen, cantidad, id_categoria, id_sucursal)
+        VALUES (%s, %s, %s, %s, %s, %s)
     """
         
-    cur.execute(query_insertion, (nombre, descripcion, barcode_data, qr_data, imagen, cantidad, id_categoria, id_sucursal))
+    cur.execute(query_insertion, (nombre, descripcion, imagen, cantidad, id_categoria, id_sucursal))
     
     mysql.connection.commit()
     
@@ -56,16 +57,36 @@ def add_producto():
     
     return jsonify({'message': 'Producto añadido correctamente'})
 
+# Obtener todos los productos
 @productos_bp.route('/productos', methods=['GET'])
 def get_all_productos():
+    token = request.headers.get('Authorization')
+    user_info = get_user_info(token)
+    if not user_info:
+        return jsonify({'error': 'Acceso no autorizado'}), 403
+
+    id_usuario, rol, id_sucursal_usuario = user_info
+
     cur = mysql.connection.cursor()
-    query = """
-        SELECT p.id_producto, p.nombre, p.descripcion, p.codigo_barras, p.codigo_qr, p.imagen, p.cantidad, p.id_categoria, c.nombre AS nombre_categoria, p.id_sucursal, s.nombre AS nombre_sucursal
-        FROM Productos p
-        JOIN Categorias c ON p.id_categoria = c.id_categoria
-        JOIN Sucursales s ON p.id_sucursal = s.id_sucursal
-    """
-    cur.execute(query)
+    
+    if rol == 'Admin':
+        query = """
+            SELECT p.id_producto, p.nombre, p.descripcion, p.imagen, p.cantidad, p.id_categoria, c.nombre AS nombre_categoria, p.id_sucursal, s.nombre AS nombre_sucursal
+            FROM Productos p
+            JOIN Categorias c ON p.id_categoria = c.id_categoria
+            JOIN Sucursales s ON p.id_sucursal = s.id_sucursal
+        """
+        cur.execute(query)
+    elif rol in ['Gerente', 'Empleado']:
+        query = """
+            SELECT p.id_producto, p.nombre, p.descripcion, p.imagen, p.cantidad, p.id_categoria, c.nombre AS nombre_categoria, p.id_sucursal, s.nombre AS nombre_sucursal
+            FROM Productos p
+            JOIN Categorias c ON p.id_categoria = c.id_categoria
+            JOIN Sucursales s ON p.id_sucursal = s.id_sucursal
+            WHERE p.id_sucursal = %s
+        """
+        cur.execute(query, (id_sucursal_usuario,))
+    
     data = cur.fetchall()
     cur.close()
     
@@ -75,24 +96,31 @@ def get_all_productos():
             'id_producto': row[0],
             'nombre': row[1],
             'descripcion': row[2],
-            'codigo_barras': row[3],
-            'codigo_qr': row[4],
-            'imagen': row[5],
-            'cantidad': row[6],
-            'id_categoria': row[7],
-            'nombre_categoria': row[8],
-            'id_sucursal': row[9],
-            'nombre_sucursal': row[10]
+            'imagen': row[3],
+            'cantidad': row[4],
+            'id_categoria': row[5],
+            'nombre_categoria': row[6],
+            'id_sucursal': row[7],
+            'nombre_sucursal': row[8]
         }
         productos.append(producto)
     
     return jsonify({'productos': productos})
 
+# Obtener un producto por ID
 @productos_bp.route('/productos/<id>', methods=['GET'])
 def get_producto(id):
+    token = request.headers.get('Authorization')
+    user_info = get_user_info(token)
+    if not user_info:
+        return jsonify({'error': 'Acceso no autorizado'}), 403
+
+    id_usuario, rol, id_sucursal_usuario = user_info
+
     cur = mysql.connection.cursor()
+    
     query = """
-        SELECT p.id_producto, p.nombre, p.descripcion, p.codigo_barras, p.codigo_qr, p.imagen, p.cantidad, p.id_categoria, c.nombre AS nombre_categoria, p.id_sucursal, s.nombre AS nombre_sucursal
+        SELECT p.id_producto, p.nombre, p.descripcion, p.imagen, p.cantidad, p.id_categoria, c.nombre AS nombre_categoria, p.id_sucursal, s.nombre AS nombre_sucursal
         FROM Productos p
         JOIN Categorias c ON p.id_categoria = c.id_categoria
         JOIN Sucursales s ON p.id_sucursal = s.id_sucursal
@@ -103,62 +131,57 @@ def get_producto(id):
     cur.close()
     
     if data:
-        producto = {
-            'id_producto': data[0],
-            'nombre': data[1],
-            'descripcion': data[2],
-            'codigo_barras': data[3],  # Decodificar y guardar el código de barras
-            'codigo_qr': data[4],  # Decodificar y guardar el código QR
-            'imagen': data[5],
-            'cantidad': data[6],
-            'id_categoria': data[7],
-            'nombre_categoria': data[8],
-            'id_sucursal': data[9],
-            'nombre_sucursal': data[10]
-        }
-        return jsonify({'producto': producto})
+        if rol in ['Admin', 'Gerente'] or (rol == 'Empleado' and data[7] == id_sucursal_usuario):
+            producto = {
+                'id_producto': data[0],
+                'nombre': data[1],
+                'descripcion': data[2],
+                'imagen': data[3],
+                'cantidad': data[4],
+                'id_categoria': data[5],
+                'nombre_categoria': data[6],
+                'id_sucursal': data[7],
+                'nombre_sucursal': data[8]
+            }
+            return jsonify({'producto': producto})
+        else:
+            return jsonify({'error': 'Permisos insuficientes'}), 403
     else:
         return jsonify({"error": "Producto no encontrado"})
 
+# Actualizar un producto
 @productos_bp.route('/productos/<id>', methods=['PUT'])
 def update_producto(id):
+    token = request.headers.get('Authorization')
+    user_info = get_user_info(token)
+    if not user_info:
+        return jsonify({'error': 'Acceso no autorizado'}), 403
+
+    id_usuario, rol, id_sucursal_usuario = user_info
+
+    if rol not in ['Admin', 'Gerente']:
+        return jsonify({'error': 'Permisos insuficientes'}), 403
+
     data = request.get_json()
     nombre = data['nombre']
     descripcion = data['descripcion']
     imagen = data['imagen']
     cantidad = data['cantidad']
     id_categoria = data['id_categoria']
-    id_sucursal = data['id_sucursal']  # Agregar el campo id_sucursal
-    
-    # Generar el código de barras
-    barcode_buffer = io.BytesIO()
-    barcode = Code128(nombre[:20], writer=ImageWriter())  # Limitar la longitud del nombre a 20 caracteres
-    barcode.write(barcode_buffer)
-    barcode_data = base64.b64encode(barcode_buffer.getvalue()).decode('utf-8')[:1000]  # Limitar la longitud de los datos codificados a 1000 caracteres
-    
-    # Generar el código QR
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(nombre[:20])  # Limitar la longitud del nombre a 20 caracteres
-    qr.make(fit=True)
-    qr_img = qr.make_image(fill_color="black", back_color="white")
-    qr_buffer = io.BytesIO()
-    qr_img.save(qr_buffer, format="PNG")
-    qr_data = base64.b64encode(qr_buffer.getvalue()).decode('utf-8')  # Limitar la longitud de los datos codificados a 1000 caracteres
+    id_sucursal = data['id_sucursal']
+
+    if rol == 'Gerente' and id_sucursal != id_sucursal_usuario:
+        return jsonify({'error': 'Permisos insuficientes para actualizar productos en otra sucursal'}), 403
     
     cur = mysql.connection.cursor()
     
     query_update = """
         UPDATE Productos
-        SET nombre = %s, descripcion = %s, codigo_barras = %s, codigo_qr = %s, imagen = %s, cantidad = %s, id_categoria = %s, id_sucursal = %s
+        SET nombre = %s, descripcion = %s, imagen = %s, cantidad = %s, id_categoria = %s, id_sucursal = %s
         WHERE id_producto = %s
     """
         
-    cur.execute(query_update, (nombre, descripcion, barcode_data, qr_data, imagen, cantidad, id_categoria, id_sucursal, id))
+    cur.execute(query_update, (nombre, descripcion, imagen, cantidad, id_categoria, id_sucursal, id))
     
     mysql.connection.commit()
     
@@ -166,8 +189,27 @@ def update_producto(id):
     
     return jsonify({'message': 'Producto actualizado correctamente'})
 
+# Eliminar un producto
 @productos_bp.route('/productos/<id>', methods=['DELETE'])
 def delete_producto(id):
+    token = request.headers.get('Authorization')
+    user_info = get_user_info(token)
+    if not user_info:
+        return jsonify({'error': 'Acceso no autorizado'}), 403
+
+    id_usuario, rol, id_sucursal_usuario = user_info
+
+    if rol not in ['Admin', 'Gerente']:
+        return jsonify({'error': 'Permisos insuficientes'}), 403
+
+    if rol == 'Gerente':
+        cur = mysql.connection.cursor()
+        cur.execute("SELECT id_sucursal FROM Productos WHERE id_producto = %s", (id,))
+        producto = cur.fetchone()
+        cur.close()
+        if producto and producto[0] != id_sucursal_usuario:
+            return jsonify({'error': 'Permisos insuficientes para eliminar productos de otra sucursal'}), 403
+
     cur = mysql.connection.cursor()
     cur.execute("DELETE FROM Productos WHERE id_producto = %s", (id,))
     mysql.connection.commit()

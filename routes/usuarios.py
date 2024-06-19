@@ -3,7 +3,6 @@ from flask_mysqldb import MySQL
 import uuid
 from datetime import datetime
 import hashlib
-import os
 
 mysql = MySQL()
 
@@ -27,7 +26,7 @@ def add_usuario():
     query_insertion = """
         INSERT INTO Usuarios (nombre, apellido_p, apellido_m, correo, rol, contrasena)
         VALUES (%s, %s, %s, %s, %s, %s)
-        """
+    """
         
     cur.execute(query_insertion, (nombre, apellido_p, apellido_m, correo, rol, hashed_contrasena))
     
@@ -93,7 +92,7 @@ def update_usuario(id):
         UPDATE Usuarios
         SET nombre = %s, apellido_p = %s, apellido_m = %s, correo = %s, rol = %s
         WHERE id_usuario = %s
-        """
+    """
         
     cur.execute(query_update, (nombre, apellido_p, apellido_m, correo, rol, id))
     
@@ -121,7 +120,12 @@ def login():
     hashed_contrasena = hashlib.sha256(contrasena.encode()).hexdigest()
     
     cur = mysql.connection.cursor()
-    cur.execute("SELECT id_usuario, nombre, apellido_p, apellido_m, correo, rol FROM Usuarios WHERE correo = %s AND contrasena = %s", (correo, hashed_contrasena))
+    cur.execute("""
+        SELECT u.id_usuario, u.nombre, u.apellido_p, u.apellido_m, u.correo, u.rol, us.id_sucursal
+        FROM Usuarios u
+        LEFT JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario
+        WHERE u.correo = %s AND u.contrasena = %s
+    """, (correo, hashed_contrasena))
     user = cur.fetchone()
     cur.close()
     
@@ -140,7 +144,8 @@ def login():
             'apellido_p': user[2],
             'apellido_m': user[3],
             'correo': user[4],
-            'rol': user[5]
+            'rol': user[5],
+            'id_sucursal': user[6]
         }
         
         return jsonify({'message': 'Inicio de sesión exitoso', 'token': token, 'user': user_info})

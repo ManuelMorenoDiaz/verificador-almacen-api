@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\Users\manue\Desktop\CUATRIMESTRE 9\Mobiles 2\app\verificador-almacen-api\venv
+set VIRTUAL_ENV=C:\Users\manue\OneDrive\Escritorio\9A\Moviles\verificador-almacen-api\venv
 
 if not defined PROMPT set PROMPT=$P$G
 
