@@ -8,6 +8,19 @@ mysql = MySQL()
 
 usuarios_bp = Blueprint('usuarios', __name__)
 
+def get_user_info(token):
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT u.id_usuario, u.rol, us.id_sucursal
+        FROM Usuarios u
+        JOIN Sesiones s ON u.id_usuario = s.id_usuario
+        LEFT JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario
+        WHERE s.token = %s AND s.fecha_fin IS NULL
+    """, (token,))
+    user = cur.fetchone()
+    cur.close()
+    return user
+
 @usuarios_bp.route('/usuarios', methods=['POST'])
 def add_usuario():
     data = request.get_json()
@@ -18,10 +31,19 @@ def add_usuario():
     rol = data['rol']
     contrasena = data['contrasena']
     
+    # Verificar que no haya usuarios con el mismo nombre y apellido en la misma sucursal
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT COUNT(*) FROM Usuarios u
+        JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario
+        WHERE u.nombre = %s AND u.apellido_p = %s AND u.apellido_m = %s
+    """, (nombre, apellido_p, apellido_m))
+    count = cur.fetchone()[0]
+    if count > 0:
+        return jsonify({'error': 'Ya existe un usuario con el mismo nombre y apellidos en la misma sucursal'})
+
     # Hashear la contraseña
     hashed_contrasena = hashlib.sha256(contrasena.encode()).hexdigest()
-    
-    cur = mysql.connection.cursor()
     
     query_insertion = """
         INSERT INTO Usuarios (nombre, apellido_p, apellido_m, correo, rol, contrasena)
@@ -38,8 +60,23 @@ def add_usuario():
 
 @usuarios_bp.route('/usuarios', methods=['GET'])
 def get_all_usuarios():
+    user = get_user_info(request.headers.get('Authorization'))
+    if not user:
+        return jsonify({"error": "No autorizado"}), 401
+
     cur = mysql.connection.cursor()
-    cur.execute("SELECT id_usuario, nombre, apellido_p, apellido_m, correo, rol FROM Usuarios")
+    if user[1] == 'Admin':
+        cur.execute("SELECT id_usuario, nombre, apellido_p, apellido_m, correo, rol FROM Usuarios")
+    elif user[1] == 'Gerente':
+        cur.execute("""
+            SELECT u.id_usuario, u.nombre, u.apellido_p, u.apellido_m, u.correo, u.rol
+            FROM Usuarios u
+            JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario
+            WHERE us.id_sucursal = %s
+        """, (user[2],))
+    else:
+        return jsonify({"error": "No autorizado"}), 403
+
     data = cur.fetchall()
     cur.close()
     
@@ -59,26 +96,50 @@ def get_all_usuarios():
 
 @usuarios_bp.route('/usuarios/<id>', methods=['GET'])
 def get_usuario(id):
+    user = get_user_info(request.headers.get('Authorization'))
+    if not user:
+        return jsonify({"error": "No autorizado"}), 401
+
     cur = mysql.connection.cursor()
-    cur.execute("SELECT id_usuario, nombre, apellido_p, apellido_m, correo, rol FROM Usuarios WHERE id_usuario = %s", (id,))
+    cur.execute("""
+        SELECT u.id_usuario, u.nombre, u.apellido_p, u.apellido_m, u.correo, u.rol, us.id_sucursal
+        FROM Usuarios u
+        LEFT JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario
+        WHERE u.id_usuario = %s
+    """, (id,))
     data = cur.fetchone()
     cur.close()
-    
+
     if data:
-        usuario = {
-            'id_usuario': data[0],
-            'nombre': data[1],
-            'apellido_p': data[2],
-            'apellido_m': data[3],
-            'correo': data[4],
-            'rol': data[5]
-        }
-        return jsonify({'usuario': usuario})
+        if user[1] == 'Admin' or (user[1] == 'Gerente' and user[2] == data[6]):
+            usuario = {
+                'id_usuario': data[0],
+                'nombre': data[1],
+                'apellido_p': data[2],
+                'apellido_m': data[3],
+                'correo': data[4],
+                'rol': data[5]
+            }
+            return jsonify({'usuario': usuario})
+        else:
+            return jsonify({"error": "No autorizado"}), 403
     else:
-        return jsonify({"error": "Usuario no encontrado"})
+        return jsonify({"error": "Usuario no encontrado"}), 404
 
 @usuarios_bp.route('/usuarios/<id>', methods=['PUT'])
 def update_usuario(id):
+    user = get_user_info(request.headers.get('Authorization'))
+    if not user:
+        return jsonify({"error": "No autorizado"}), 401
+
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT us.id_sucursal FROM Usuarios u LEFT JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario WHERE u.id_usuario = %s", (id,))
+    user_data = cur.fetchone()
+    cur.close()
+
+    if user[1] != 'Admin' and not (user[1] == 'Gerente' and user[2] == user_data[0]):
+        return jsonify({"error": "No autorizado"}), 403
+
     data = request.get_json()
     nombre = data['nombre']
     apellido_p = data['apellido_p']
@@ -104,6 +165,18 @@ def update_usuario(id):
 
 @usuarios_bp.route('/usuarios/<id>', methods=['DELETE'])
 def delete_usuario(id):
+    user = get_user_info(request.headers.get('Authorization'))
+    if not user:
+        return jsonify({"error": "No autorizado"}), 401
+
+    cur = mysql.connection.cursor()
+    cur.execute("SELECT us.id_sucursal FROM Usuarios u LEFT JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario WHERE u.id_usuario = %s", (id,))
+    user_data = cur.fetchone()
+    cur.close()
+
+    if user[1] != 'Admin' and not (user[1] == 'Gerente' and user[2] == user_data[0]):
+        return jsonify({"error": "No autorizado"}), 403
+
     cur = mysql.connection.cursor()
     cur.execute("DELETE FROM Usuarios WHERE id_usuario = %s", (id,))
     mysql.connection.commit()
@@ -170,16 +243,3 @@ def logout():
     else:
         cur.close()
         return jsonify({'error': 'Token no válido o ya expirado'})
-
-def get_user_info(token):
-    cur = mysql.connection.cursor()
-    cur.execute("""
-        SELECT u.id_usuario, u.rol, us.id_sucursal
-        FROM Usuarios u
-        JOIN Sesiones s ON u.id_usuario = s.id_usuario
-        LEFT JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario
-        WHERE s.token = %s AND s.fecha_fin IS NULL
-    """, (token,))
-    user = cur.fetchone()
-    cur.close()
-    return user
