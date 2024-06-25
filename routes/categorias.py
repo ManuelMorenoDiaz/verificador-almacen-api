@@ -1,12 +1,16 @@
 from flask import Blueprint, request, jsonify
 from flask_mysqldb import MySQL
-
+from routes.usuarios import get_user_info
 mysql = MySQL()
 
 categorias_bp = Blueprint('categorias', __name__)
 
 @categorias_bp.route('/categorias', methods=['POST'])
 def add_categoria():
+    user = get_user_info(request.headers.get('Authorization'))
+    if not user or user[1] != 'Admin':
+        return jsonify({"error": "No autorizado"}), 403
+
     data = request.get_json()
     nombre = data['nombre']
     descripcion = data['descripcion']
@@ -17,7 +21,7 @@ def add_categoria():
     query_insertion = """
         INSERT INTO Categorias (nombre, descripcion, imagen)
         VALUES (%s, %s, %s)
-        """
+    """
         
     cur.execute(query_insertion, (nombre, descripcion, imagen))
     
@@ -66,6 +70,10 @@ def get_categoria(id):
 
 @categorias_bp.route('/categorias/<id>', methods=['PUT'])
 def update_categoria(id):
+    user = get_user_info(request.headers.get('Authorization'))
+    if not user or user[1] != 'Admin':
+        return jsonify({"error": "No autorizado"}), 403
+
     data = request.get_json()
     nombre = data['nombre']
     descripcion = data['descripcion']
@@ -77,7 +85,7 @@ def update_categoria(id):
         UPDATE Categorias
         SET nombre = %s, descripcion = %s, imagen = %s
         WHERE id_categoria = %s
-        """
+    """
         
     cur.execute(query_update, (nombre, descripcion, imagen, id))
     
@@ -89,6 +97,10 @@ def update_categoria(id):
 
 @categorias_bp.route('/categorias/<id>', methods=['DELETE'])
 def delete_categoria(id):
+    user = get_user_info(request.headers.get('Authorization'))
+    if not user or user[1] != 'Admin':
+        return jsonify({"error": "No autorizado"}), 403
+
     cur = mysql.connection.cursor()
     cur.execute("DELETE FROM Categorias WHERE id_categoria = %s", (id,))
     mysql.connection.commit()
