@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_mysqldb import MySQL
-from usuarios import get_user_info
+from routes.usuarios import get_user_info
 mysql = MySQL()
 
 productos_bp = Blueprint('productos', __name__)
