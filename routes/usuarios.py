@@ -170,3 +170,16 @@ def logout():
     else:
         cur.close()
         return jsonify({'error': 'Token no válido o ya expirado'})
+
+def get_user_info(token):
+    cur = mysql.connection.cursor()
+    cur.execute("""
+        SELECT u.id_usuario, u.rol, us.id_sucursal
+        FROM Usuarios u
+        JOIN Sesiones s ON u.id_usuario = s.id_usuario
+        LEFT JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario
+        WHERE s.token = %s AND s.fecha_fin IS NULL
+    """, (token,))
+    user = cur.fetchone()
+    cur.close()
+    return user

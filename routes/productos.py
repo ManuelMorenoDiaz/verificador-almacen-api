@@ -1,22 +1,9 @@
 from flask import Blueprint, request, jsonify
 from flask_mysqldb import MySQL
-
+from usuarios import get_user_info
 mysql = MySQL()
 
 productos_bp = Blueprint('productos', __name__)
-
-def get_user_info(token):
-    cur = mysql.connection.cursor()
-    cur.execute("""
-        SELECT u.id_usuario, u.rol, us.id_sucursal
-        FROM Usuarios u
-        JOIN Sesiones s ON u.id_usuario = s.id_usuario
-        LEFT JOIN UsuariosSucursales us ON u.id_usuario = us.id_usuario
-        WHERE s.token = %s AND s.fecha_fin IS NULL
-    """, (token,))
-    user = cur.fetchone()
-    cur.close()
-    return user
 
 # Crear un producto
 @productos_bp.route('/productos', methods=['POST'])
