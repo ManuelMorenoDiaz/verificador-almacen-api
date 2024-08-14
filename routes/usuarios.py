@@ -21,6 +21,15 @@ def get_user_info(token):
     cur.close()
     return user
 
+@usuarios_bp.route('/usuariosinfo', methods=['GET'])
+def get_user_info_route():
+    token = request.headers.get('Authorization')
+    user = get_user_info(token)
+    if user:
+        return jsonify({'id_usuario': user[0], 'rol': user[1], 'id_sucursal': user[2]})
+    else:
+        return jsonify({'error': 'No autorizado'}), 401
+
 @usuarios_bp.route('/usuarios', methods=['POST'])
 def add_usuario():
     data = request.get_json()

@@ -27,7 +27,6 @@ def add_sucursal():
     cur.close()
     
     return jsonify({'message': 'Sucursal añadida correctamente'})
-
 @sucursales_bp.route('/sucursales', methods=['GET'])
 def get_all_sucursales():
     token = request.headers.get('Authorization')
@@ -42,11 +41,13 @@ def get_all_sucursales():
     if rol == 'Admin':
         query = "SELECT * FROM Sucursales"
         cur.execute(query)
+        data = cur.fetchall()
+        
     else:
         query = "SELECT * FROM Sucursales WHERE id_sucursal = %s"
         cur.execute(query, (id_sucursal_usuario,))
+        data = cur.fetchall()
     
-    data = cur.fetchall()
     cur.close()
     
     sucursales = []
@@ -57,6 +58,7 @@ def get_all_sucursales():
             'direccion': row[2]
         }
         sucursales.append(sucursal)
+
     
     return jsonify({'sucursales': sucursales})
 
@@ -109,7 +111,6 @@ def update_sucursal(id):
     cur.close()
     
     return jsonify({'message': 'Sucursal actualizada correctamente'})
-
 @sucursales_bp.route('/sucursales/<id>', methods=['DELETE'])
 def delete_sucursal(id):
     token = request.headers.get('Authorization')
@@ -118,7 +119,17 @@ def delete_sucursal(id):
         return jsonify({'error': 'Permisos insuficientes'}), 403
 
     cur = mysql.connection.cursor()
-    cur.execute("DELETE FROM Sucursales WHERE id_sucursal = %s", (id,))
-    mysql.connection.commit()
-    cur.close()
-    return jsonify({'result': 'Sucursal eliminada correctamente'})
+    try:
+        # Primero, eliminar los productos asociados
+        cur.execute("DELETE FROM productos WHERE id_sucursal = %s", (id,))
+        
+        # Luego, eliminar la sucursal
+        cur.execute("DELETE FROM sucursales WHERE id_sucursal = %s", (id,))
+        
+        mysql.connection.commit()
+        return jsonify({'result': 'Sucursal eliminada correctamente'})
+    except Exception as e:
+        mysql.connection.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        cur.close()

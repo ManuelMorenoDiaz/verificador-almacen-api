@@ -41,7 +41,7 @@ def add_usuario_sucursal():
 @usuarios_sucursales_bp.route('/usuarios_sucursales', methods=['GET'])
 def get_all_usuarios_sucursales():
     user = get_user_info(request.headers.get('Authorization'))
-    if not user or user[1] not in ['Admin', 'Gerente']:
+    if not user or user[1] not in ['Admin', 'Gerente','Empleado']:
         return jsonify({"error": "No autorizado"}), 403
 
     cur = mysql.connection.cursor()
